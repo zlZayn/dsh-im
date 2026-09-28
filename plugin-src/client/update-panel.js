@@ -4,6 +4,7 @@ import validSemver from 'semver/functions/valid.js';
 import compareVersionsDescending from 'semver/functions/rcompare.js';
 
 import { h, localizeText } from './i18n.js';
+import { HelpTip } from './help-tip.js';
 import { createPollScheduler } from './lifecycle.js';
 
 export const UPDATE_RPC_CHANNEL = '/dsh-im';
@@ -230,9 +231,10 @@ function UpdateDialog({ children, onClose }) {
       }
     },
   },
-  h('h3', { id: titleId }, 'DSH-IM 更新'),
-  h('p', { id: descriptionId, className: 'dim-updateDescription' },
-    '仅更新 DSH-IM。安装完成后需手动重启后台；本功能不会自动重启或主动刷新页面。'),
+  h('div', { className: 'dim-helpRow' },
+    h('h3', { id: titleId }, 'DSH-IM 更新'),
+    h(HelpTip, { id: descriptionId, label: '查看 DSH-IM 更新说明' },
+      '仅更新 DSH-IM。安装完成后需手动重启后台；本功能不会自动重启或主动刷新页面。')),
   children));
   return typeof document !== 'undefined' && document.body
     ? createPortal(content, document.body)
@@ -467,13 +469,6 @@ export function UpdatePanel({ rpcCall, clientVersion, onStatus }) {
         versionsDiffer && !restartRequired ? h('p', { className: 'dim-updateHint' }, '页面版本与运行版本不同，请手动刷新页面；若仍不一致，请手动重启 Harness 或 Desktop。') : null,
         canConfirm ? h('p', { className: 'dim-updateHint' },
           '请在机器人空闲时安装；安装会修改当前 profile 的依赖，完成后需手动重启。') : null,
-        h('aside', { className: 'dim-updateHint', 'aria-label': 'DSH 版本兼容说明' },
-          h('strong', null, 'DSH 版本兼容说明'),
-          h('p', { className: 'dim-updateManualHint' }, 'dsh-im 4.25.0 支持到 DSH v0.1.6-alpha.2。'),
-          h('p', { className: 'dim-updateManualHint' }, 'dsh-im 4.26.0 仅支持 DSH v0.1.7-alpha.1。'),
-          h('p', { className: 'dim-updateManualHint' }, 'dsh-im 4.27.0 仅支持 DSH v0.1.7-alpha.1 及更新版本。'),
-          h('p', { className: 'dim-updateManualHint' },
-            '升级到 dsh-im 4.26.0 前，请先将 DSH 升级到 v0.1.7-alpha.1；使用旧版 DSH 请保留 dsh-im 4.25.0。')),
         h(ManualUpdateCommand, {
           key: manualCommand ?? 'unavailable', command: manualCommand,
           disabled: busyAction || activeJob || uncertainInstall,
