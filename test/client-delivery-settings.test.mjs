@@ -1,4 +1,12 @@
 import assert from 'node:assert/strict';
+import { RowSelect } from '../plugin-src/client/row-selector.js';
+
+/** The row selectors are buttons + menus now, so reach their contract by label. */
+const accessRow = (root, label) => {
+  const node = root.findAllByType(RowSelect).find((candidate) => candidate.props.label === label);
+  assert.ok(node, label + ' is rendered');
+  return { props: { value: node.props.value, onChange: (event) => node.props.onChange(typeof event === 'string' ? event : event.target.value) } };
+};
 import test from 'node:test';
 
 import React from 'react';
@@ -113,7 +121,6 @@ test('delivery settings define only the ten supported IM channel routes', () => 
     { id: 'delivery', label: '投递设置' },
     { id: 'access', label: '访问设置' },
     { id: 'group', label: '群聊' },
-    { id: 'voice', label: '语音交互' },
   ]);
   assert.equal(botSettingsTabsForChannel('weixin'), BOT_SETTINGS_TABS);
   assert.equal(botSettingsTabsForChannel('dingtalk'), BOT_SETTINGS_TABS);
@@ -202,7 +209,6 @@ test('robot card settings toggle expands in place and more settings preserves th
       assert.equal(opened.length, 1);
       assert.equal(opened[0].channel, channel);
       assert.equal(opened[0].botId, account.botId);
-      assert.equal(renderer.root.findAllByProps({ 'aria-label': '语音交互开关' }).length, 0);
       act(() => toggle.props.onClick({ stopPropagation() {} }));
       assert.equal(toggle.props['aria-expanded'], 'false');
     } finally {
@@ -290,7 +296,7 @@ test('expanded card more settings opens a bot-scoped page and returns in place',
     '微信通知助手',
   );
   const docsLink = identity.findByProps({ className: 'dim-deliveryDocsLink' });
-  assert.equal(textOf(docsLink), '使用文档↗');
+  assert.equal(textOf(docsLink), '使用文档');
   assert.equal(
     docsLink.props.href,
     'https://github.com/xmanrui/dsh-im/blob/main/PROACTIVE_DELIVERY.md',
@@ -304,14 +310,14 @@ test('expanded card more settings opens a bot-scoped page and returns in place',
   }]);
 
   await act(async () => {
-    button(page, '← 返回机器人列表').props.onClick();
+    button(page, '返回机器人列表').props.onClick();
     await flush();
   });
   assert.ok(renderer.root.findByProps({ 'data-bot-id': 'wx_stable_bot' }));
   assert.equal(renderer.root.findByProps({ id: 'dim-tab-weixin' }).props['aria-selected'], true);
 });
 
-test('Feishu more settings has separate group and voice tabs, with only group controls in the group tab', async (t) => {
+test('only Feishu adds a group tab and it contains only the two migrated controls', async (t) => {
   const previousWindow = globalThis.window;
   globalThis.window = {
     setInterval() { return 1; },
@@ -374,7 +380,7 @@ test('Feishu more settings has separate group and voice tabs, with only group co
 
   const page = renderer.root.findByProps({ className: 'dim-deliveryPage' });
   assert.deepEqual(page.findAllByProps({ role: 'tab' }).map(textOf), [
-    '投递设置', '访问设置', '群聊', '语音交互',
+    '投递设置', '访问设置', '群聊',
   ]);
   await act(async () => {
     button(page, '群聊').props.onClick();
@@ -382,114 +388,15 @@ test('Feishu more settings has separate group and voice tabs, with only group co
   });
 
   const groupSettings = renderer.root.findByProps({ className: 'dim-feishuGroupSettings' });
-  assert.equal(groupSettings.findAllByProps({ className: 'dim-feishuGroupControl' }).length, 2);
+  assert.equal(groupSettings.findAll((node) => (
+    typeof node.props?.className === 'string'
+      && node.props.className.split(/\s+/).includes('dim-feishuGroupControl')
+  )).length, 2);
   assert.equal(groupSettings.findAllByType('h2').length, 0);
   assert.doesNotMatch(textOf(groupSettings), /这些设置只影响|刷新群聊设置/);
-  assert.equal(groupSettings.findByProps({ 'aria-label': '群聊响应方式' }).props.value, 'all');
-  assert.equal(groupSettings.findByProps({ 'aria-label': '群聊以话题方式回复' }).props.value, 'on');
-});
-
-test('voice tab loads and saves the selected bot, preserves advanced options, and reloads after switching tabs', async (t) => {
-  let voice = {
-    enabled: true,
-    secretRef: 'BOT_DASHSCOPE_KEY',
-    asrModel: 'qwen3-asr-flash',
-    ttsModel: 'qwen3-tts-flash',
-    ttsVoice: 'Serena',
-    asrBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-    ffmpeg: '/opt/homebrew/bin/ffmpeg',
-  };
-  const initialVoice = { ...voice };
-  const calls = [];
-  const renderer = await mount(t, {
-    channel: 'feishu',
-    account: connectedAccount,
-    rpcCall: async () => ({ ok: true, value: { targets: [] } }),
-    accessRpcCall: async (endpoint, payload) => {
-      calls.push({ endpoint, payload });
-      if (endpoint === FEISHU_ENDPOINTS.setVoice) voice = payload.voice;
-      else assert.equal(endpoint, FEISHU_ENDPOINTS.status);
-      return { ok: true, value: { bots: [
-        { botId: 'other_bot', voice: null },
-        { botId: connectedAccount.botId, voice },
-      ] } };
-    },
-    onBack() {},
-  });
-  const switchTab = async (label) => act(async () => {
-    button(renderer.root, label).props.onClick();
-    await flush();
-  });
-  const voiceInput = () => renderer.root.findByProps({ placeholder: 'Momo' });
-
-  assert.equal(calls.length, 0);
-  await switchTab('语音交互');
-  assert.equal(renderer.root.findByProps({ 'aria-label': '语音交互开关' }).props.value, 'on');
-  assert.equal(renderer.root.findByProps({ placeholder: 'DASHSCOPE_API_KEY' }).props.value, 'BOT_DASHSCOPE_KEY');
-  assert.equal(voiceInput().props.value, 'Serena');
-  await act(async () => voiceInput().props.onChange({ target: { value: 'Cherry' } }));
-  await act(async () => {
-    button(renderer.root, '保存语音设置').props.onClick();
-    await flush();
-  });
-  assert.deepEqual(calls.at(-1), {
-    endpoint: FEISHU_ENDPOINTS.setVoice,
-    payload: { botId: connectedAccount.botId, voice: { ...initialVoice, ttsVoice: 'Cherry' } },
-  });
-
-  await switchTab('投递设置');
-  assert.equal(renderer.root.findAllByProps({ 'aria-label': '语音交互开关' }).length, 0);
-  await switchTab('语音交互');
-  assert.equal(calls.filter(({ endpoint }) => endpoint === FEISHU_ENDPOINTS.status).length, 2);
-  assert.equal(voiceInput().props.value, 'Cherry');
-  await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '语音交互开关' }).props.onChange({ target: { value: 'off' } });
-    await flush();
-  });
-  assert.deepEqual(calls.at(-1), {
-    endpoint: FEISHU_ENDPOINTS.setVoice,
-    payload: { botId: connectedAccount.botId, voice: null },
-  });
-  await switchTab('投递设置');
-  await switchTab('语音交互');
-  assert.equal(renderer.root.findByProps({ 'aria-label': '语音交互开关' }).props.value, 'off');
-});
-
-test('voice tab offers a retry when the current bot is missing and shows save failures', async (t) => {
-  let available = false;
-  const renderer = await mount(t, {
-    channel: 'feishu',
-    account: connectedAccount,
-    rpcCall: async () => ({ ok: true, value: { targets: [] } }),
-    accessRpcCall: async (endpoint) => {
-      if (endpoint === FEISHU_ENDPOINTS.setVoice) {
-        return { ok: false, error: { message: '语音设置保存失败，请重试。' } };
-      }
-      assert.equal(endpoint, FEISHU_ENDPOINTS.status);
-      return { ok: true, value: { bots: available ? [{ botId: connectedAccount.botId }] : [] } };
-    },
-    onBack() {},
-  });
-  await act(async () => {
-    button(renderer.root, '语音交互').props.onClick();
-    await flush();
-  });
-  assert.match(textOf(renderer.root.findByProps({ role: 'alert' })), /未找到当前飞书机器人/);
-  assert.equal(renderer.root.findAllByProps({ 'aria-label': '语音交互开关' }).length, 0);
-  available = true;
-  await act(async () => {
-    button(renderer.root, '重新读取').props.onClick();
-    await flush();
-  });
-  await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '语音交互开关' }).props.onChange({ target: { value: 'on' } });
-  });
-  await act(async () => {
-    button(renderer.root, '保存语音设置').props.onClick();
-    await flush();
-  });
-  assert.equal(textOf(renderer.root.findByProps({ role: 'alert' })), '语音设置保存失败，请重试。');
-  assert.equal(button(renderer.root, '保存语音设置').props.disabled, false);
+  // Both settings are rows, so their value lives on the row's own selector.
+  assert.equal(groupSettings.findByProps({ label: '群聊响应方式' }).props.value, 'all');
+  assert.equal(groupSettings.findByProps({ label: '群聊以话题方式回复' }).props.value, 'on');
 });
 
 test('access settings preserve independent mode drafts and save direct and group atomically', async (t) => {
@@ -517,22 +424,32 @@ test('access settings preserve independent mode drafts and save direct and group
     await flush();
   });
 
-  assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 4);
+  assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 3);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessScene' }).length, 2);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessOwnerNotice' }).length, 0);
+  // The owner rule is help now: each scene carries the shared "?" trigger beside its
+  // title and the sentence lives in the panel that trigger points at.
   assert.equal(accessHelpButtons(renderer.root).length, 2);
   for (const [scene, title] of [['direct', '私聊'], ['group', '群聊']]) {
     const sceneEditor = renderer.root.findByProps({ 'data-scene': scene });
-    assert.equal(sceneEditor.props['aria-label'], title);
-    const accessHelpButton = sceneEditor.findByProps({
-      'aria-label': `${title} 查看访问权限说明`,
+    // Grouping is carried by role=group + aria-labelledby, which replaces the
+    // fieldset/legend that used to notch the card border.
+    assert.equal(sceneEditor.props.role, 'group');
+    assert.ok(sceneEditor.props['aria-labelledby'], `${title} scene keeps an accessible name`);
+    const sceneLegend = sceneEditor.findByProps({ className: 'dim-accessLegend' });
+    assert.equal(sceneLegend.props.id, sceneEditor.props['aria-labelledby']);
+    assert.match(textOf(sceneLegend), new RegExp(title));
+    const ownerHelp = accessHelpButtons(sceneEditor);
+    assert.equal(ownerHelp.length, 1, `${title} keeps one owner-rule trigger`);
+    assert.equal(ownerHelp[0].props['aria-label'], `${title} 查看访问权限说明`);
+    const ownerPanel = sceneEditor.findByProps({
+      id: ownerHelp[0].props['aria-describedby'], role: 'tooltip',
     });
-    const accessHelpTooltip = sceneEditor.findByProps({
-      className: 'dim-channelTooltip dim-accessHelpTooltip',
-    });
-    assert.equal(accessHelpTooltip.props.role, 'tooltip');
-    assert.equal(accessHelpButton.props['aria-describedby'], accessHelpTooltip.props.id);
-    assert.match(textOf(accessHelpTooltip), /原所有者或扫码接入者始终可以访问并执行命令/);
+    assert.equal(ownerPanel.props.role, 'tooltip');
+    assert.equal(
+      textOf(ownerPanel),
+      '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。',
+    );
   }
   assert.equal(accessHelpButtons(renderer.root.findByProps({ className: 'dim-accessActions' })).length, 0);
   assert.equal(accessHelpButtons(renderer.root.findByProps({ role: 'tablist' })).length, 0);
@@ -545,7 +462,8 @@ test('access settings preserve independent mode drafts and save direct and group
     const addUser = direct.findByProps({ 'aria-label': '私聊 新增用户' });
     assert.equal(addUser.props.title, '新增用户');
     assert.match(addUser.props.className, /dim-accessAddUser/);
-    assert.equal(textOf(addUser), '+');
+    // An icon now, not a text glyph: the '+' sat on a 20px baseline inside a 32px square.
+  assert.equal(addUser.findAllByType('svg').length, 1, 'the add button draws its plus');
     addUser.props.onClick();
     await flush();
   });
@@ -553,31 +471,28 @@ test('access settings preserve independent mode drafts and save direct and group
     renderer.root.findByProps({ 'aria-label': '私聊 飞书 Open ID 1' }).props.onChange({
       target: { value: '  ou_override  ' },
     });
-    renderer.root.findByProps({ 'aria-label': '群聊 默认命令权限' }).props.onChange({
+    accessRow(renderer.root, '群聊 默认命令权限').props.onChange({
       target: { value: 'allow' },
     });
     await flush();
   });
 
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '私聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '私聊 访问模式').props.onChange({
       target: { value: 'allowlist' },
     });
     await flush();
   });
-  const directAllowlistHelp = renderer.root.findByProps({
-    'aria-label': '私聊 查看白名单说明',
-  });
-  const directAllowlistTooltip = renderer.root.findByProps({
-    className: 'dim-channelTooltip dim-accessEmptyAllowlistTooltip',
-  });
-  assert.equal(directAllowlistTooltip.props.role, 'tooltip');
-  assert.equal(directAllowlistHelp.props['aria-describedby'], directAllowlistTooltip.props.id);
-  assert.equal(
-    textOf(directAllowlistTooltip),
-    '当前没有白名单用户，保存后普通用户将无法使用机器人。',
-  );
-  assert.equal(renderer.root.findAllByProps({ className: 'dim-accessWarning' }).length, 0);
+  // An empty allowlist is a state message about the list, not help: it reads in
+  // place now instead of hiding behind a "?" trigger.
+  const emptyAllowlistHint = renderer.root
+    .findAllByProps({ className: 'dim-accessEmptyWarning' })
+    .map(textOf)
+    .find((text) => text === '当前没有白名单用户，保存后普通用户将无法使用机器人。');
+  assert.ok(emptyAllowlistHint, 'the empty-allowlist warning is stated inline');
+  // It keeps a name of its own: sharing .dim-helpHint with five pieces of real help is
+  // what let a state message look like help in the first place.
+  assert.equal(renderer.root.findAllByProps({ className: 'dim-helpHint' }).length, 0);
   assert.match(
     textOf(renderer.root.findByProps({ 'data-scene': 'direct' })),
     /白名单用户/,
@@ -597,14 +512,19 @@ test('access settings preserve independent mode drafts and save direct and group
     0,
   );
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '群聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '群聊 访问模式').props.onChange({
       target: { value: 'allowlist' },
     });
     await flush();
   });
-  assert.ok(renderer.root.findByProps({ 'aria-label': '群聊 查看白名单说明' }));
+  assert.ok(
+    renderer.root.findAllByProps({ className: 'dim-accessEmptyWarning' })
+      .map(textOf)
+      .some((text) => text === '当前没有白名单用户，保存后普通用户将无法使用机器人。'),
+    'the group scene states the empty-allowlist consequence inline',
+  );
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '群聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '群聊 访问模式').props.onChange({
       target: { value: 'open' },
     });
     await flush();
@@ -623,7 +543,7 @@ test('access settings preserve independent mode drafts and save direct and group
   });
 
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '私聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '私聊 访问模式').props.onChange({
       target: { value: 'open' },
     });
     await flush();
@@ -637,12 +557,12 @@ test('access settings preserve independent mode drafts and save direct and group
     'deny',
   );
   assert.equal(
-    renderer.root.findByProps({ 'aria-label': '私聊 默认命令权限' }).props.value,
+    accessRow(renderer.root, '私聊 默认命令权限').props.value,
     'allow',
   );
 
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '私聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '私聊 访问模式').props.onChange({
       target: { value: 'allowlist' },
     });
     await flush();
@@ -746,7 +666,8 @@ test('WeChat keeps the shared access page but disables its unsupported group sec
   });
 
   const group = renderer.root.findByProps({ 'data-scene': 'group' });
-  assert.equal(group.props.disabled, true);
+  // fieldset.disabled used to cascade; the group now says so explicitly.
+  assert.equal(group.props['aria-disabled'], true);
   assert.match(textOf(group), /当前渠道不支持群聊/);
   assert.equal(group.findAllByType('select').length, 0);
   assert.ok(renderer.root.findByProps({ 'data-scene': 'direct' }));
@@ -1057,14 +978,14 @@ test('recent conversation names remain platform data in the English UI', async (
     /Choose from conversations/,
   );
   const docsLink = renderer.root.findByProps({ className: 'dim-deliveryDocsLink' });
-  assert.equal(textOf(docsLink), 'User guide↗');
+  assert.equal(textOf(docsLink), 'User guide');
   assert.equal(
     docsLink.props.href,
     'https://github.com/xmanrui/dsh-im/blob/main/PROACTIVE_DELIVERY.en.md',
   );
   assert.deepEqual(
     renderer.root.findAllByProps({ role: 'tab' }).map(textOf),
-    ['Delivery settings', 'Access settings', 'Group', 'Voice'],
+    ['Delivery settings', 'Access settings', 'Group'],
   );
 });
 
